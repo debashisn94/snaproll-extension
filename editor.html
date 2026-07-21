@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Snaproll — Editor</title>
+    <link rel="stylesheet" href="editor.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M9 3l-1.8 2H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>
+        </span>
+        <span class="brand-name">Snaproll</span>
+      </div>
+      <div class="tools">
+        <button id="cropBtn" class="btn">✂ Crop</button>
+        <button id="applyBtn" class="btn hidden">✓ Apply</button>
+        <button id="cancelBtn" class="btn ghost hidden">Cancel</button>
+        <span class="sep"></span>
+        <button id="resetBtn" class="btn ghost" disabled>↺ Reset</button>
+        <span class="sep"></span>
+        <button id="pngBtn" class="btn primary">Download PNG</button>
+        <button id="jpgBtn" class="btn">JPG</button>
+        <button id="pdfBtn" class="btn">PDF</button>
+        <button id="copyBtn" class="btn ghost">Copy</button>
+        <span class="sep"></span>
+        <button id="discardBtn" class="btn ghost danger">🗑 Discard</button>
+      </div>
+    </header>
+
+    <div id="hint" class="hint hidden">
+      Drag on the image to select a region, then press <b>Apply</b>.
+    </div>
+
+    <main id="stage" class="stage">
+      <div id="wrap" class="wrap">
+        <canvas id="view"></canvas>
+        <div id="selection" class="selection hidden"></div>
+      </div>
+      <div id="empty" class="empty hidden">
+        <h2>Nothing to edit</h2>
+        <p>Click the Snaproll toolbar icon on any page to capture it, then this
+          editor opens with your screenshot.</p>
+      </div>
+      <div id="loading" class="empty">
+        <div class="spinner"></div>
+        <p>Stitching your screenshot…</p>
+      </div>
+    </main>
+
+    <footer id="meta" class="meta"></footer>
+
+    <script src="editor.js"></script>
+  </body>
+</html>

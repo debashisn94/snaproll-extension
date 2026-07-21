@@ -1,0 +1,274 @@
+// Snaproll — service worker
+// Orchestrates a full-page capture: measure -> scroll tile-by-tile ->
+// captureVisibleTab -> stash tiles in storage -> open the editor tab.
+
+const CAPTURE_KEY = "snaproll_capture";
+const RENDER_WAIT_MS = 130;      // let the page paint after each scroll
+const MIN_CAPTURE_GAP_MS = 600;  // stay under captureVisibleTab rate limit
+const CAPTURE_HIDE_MS = 70;      // let the hidden overlay leave the frame before we snap
+
+let busy = false;
+
+chrome.action.onClicked.addListener((tab) => {
+  if (busy) return;
+  if (!tab || tab.id == null) return;
+  if (/^(chrome|edge|about|chrome-extension|devtools):/i.test(tab.url || "")) {
+    badge("no", "#c0392b");
+    setTimeout(clearBadge, 2000);
+    return;
+  }
+  busy = true;
+  run(tab)
+    .catch((err) => {
+      console.error("Snaproll capture failed:", err);
+      badge("err", "#c0392b");
+      setTimeout(clearBadge, 3000);
+    })
+    .finally(() => {
+      busy = false;
+    });
+});
+
+async function run(tab) {
+  const info = await inject(tab.id, prepareCapture);
+  const { totalWidth, totalHeight, viewportW, viewportH, dpr } = info;
+
+  const yStops = stops(totalHeight, viewportH);
+  const xStops = stops(totalWidth, viewportW);
+  const total = yStops.length * xStops.length;
+
+  const tiles = [];
+  let done = 0;
+  let first = true;
+  let lastCapture = 0;
+
+  try {
+    await inject(tab.id, createOverlay, [total]);
+    await inject(tab.id, updateOverlay, [0, total]); // seed dots at 0
+
+    for (const y of yStops) {
+      for (const x of xStops) {
+        // Overlay stays VISIBLE here — the user watches it while the page settles.
+        const pos = await inject(tab.id, scrollTile, [x, y, !first]);
+        await delay(RENDER_WAIT_MS);
+
+        const gap = Date.now() - lastCapture;
+        if (gap < MIN_CAPTURE_GAP_MS) await delay(MIN_CAPTURE_GAP_MS - gap);
+
+        // Hide the overlay ONLY for the shot, and give it a beat to leave the frame.
+        await inject(tab.id, toggleOverlay, [false]);
+        await delay(CAPTURE_HIDE_MS);
+
+        let dataUrl;
+        try {
+          dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+        } catch (e) {
+          // Rate-limited or transient — back off once and retry.
+          await delay(900);
+          dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+        }
+        lastCapture = Date.now();
+
+        tiles.push({ x: pos.x, y: pos.y, dataUrl });
+        first = false;
+        done++;
+        badge(`${Math.round((done / total) * 100)}`, "#6d5efc");
+        await inject(tab.id, updateOverlay, [done, total]); // re-show + advance
+      }
+    }
+  } finally {
+    await inject(tab.id, restorePage); // always restore + remove overlay
+  }
+
+  await chrome.storage.local.set({
+    [CAPTURE_KEY]: {
+      tiles,
+      totalWidth,
+      totalHeight,
+      viewportW,
+      viewportH,
+      dpr,
+      url: tab.url,
+      title: tab.title,
+      ts: Date.now(),
+    },
+  });
+
+  clearBadge();
+  await chrome.tabs.create({ url: chrome.runtime.getURL("editor.html") });
+}
+
+// --- helpers ---------------------------------------------------------------
+
+function stops(total, step) {
+  const out = [];
+  for (let v = 0; v < total; v += step) out.push(v);
+  if (out.length === 0) out.push(0);
+  return out;
+}
+
+function inject(tabId, func, args = []) {
+  return chrome.scripting
+    .executeScript({ target: { tabId }, func, args })
+    .then((r) => (r && r[0] ? r[0].result : null));
+}
+
+function delay(ms) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+function badge(text, color) {
+  chrome.action.setBadgeBackgroundColor({ color });
+  chrome.action.setBadgeText({ text });
+}
+function clearBadge() {
+  chrome.action.setBadgeText({ text: "" });
+}
+
+// --- functions injected into the page (must be self-contained) -------------
+
+function prepareCapture() {
+  const doc = document.documentElement;
+  const body = document.body;
+  const totalWidth = Math.max(
+    doc.scrollWidth,
+    body ? body.scrollWidth : 0,
+    doc.clientWidth
+  );
+  const totalHeight = Math.max(
+    doc.scrollHeight,
+    body ? body.scrollHeight : 0,
+    doc.clientHeight
+  );
+
+  const style = document.createElement("style");
+  style.id = "__snaproll_style";
+  style.textContent =
+    "::-webkit-scrollbar{width:0!important;height:0!important;display:none!important}" +
+    "html{scrollbar-width:none!important}";
+  (document.head || doc).appendChild(style);
+
+  window.__snaproll = {
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+    scrollBehavior: doc.style.scrollBehavior,
+    hidden: [],
+  };
+  doc.style.scrollBehavior = "auto";
+
+  return {
+    totalWidth,
+    totalHeight,
+    viewportW: window.innerWidth,
+    viewportH: window.innerHeight,
+    dpr: window.devicePixelRatio || 1,
+  };
+}
+
+function scrollTile(x, y, hideFixed) {
+  const s = window.__snaproll;
+  if (hideFixed && s && s.hidden.length === 0) {
+    const all = document.body ? document.body.querySelectorAll("*") : [];
+    for (const el of all) {
+      const cs = getComputedStyle(el);
+      if ((cs.position === "fixed" || cs.position === "sticky") && cs.display !== "none") {
+        s.hidden.push([el, el.style.getPropertyValue("display"), el.style.getPropertyPriority("display")]);
+        el.style.setProperty("display", "none", "important");
+      }
+    }
+  }
+  window.scrollTo(x, y);
+  return { x: window.scrollX, y: window.scrollY };
+}
+
+function toggleOverlay(show) {
+  const ov = window.__snaproll_ov;
+  if (ov) ov.el.style.display = show ? "block" : "none";
+}
+
+function createOverlay(total) {
+  const CSS = `
+    #__snaproll_ov{position:fixed;top:18px;left:50%;transform:translateX(-50%);
+      width:336px;max-width:90vw;z-index:2147483647;pointer-events:none;
+      background:rgba(24,22,38,0.68);
+      -webkit-backdrop-filter:blur(24px) saturate(165%);
+      backdrop-filter:blur(24px) saturate(165%);
+      border:1px solid rgba(255,255,255,0.14);border-radius:18px;overflow:hidden;
+      box-shadow:0 24px 70px rgba(0,0,0,.45),0 0 0 1px rgba(109,94,252,.12),
+        inset 0 1px 0 rgba(255,255,255,.08);
+      color:#eef0f7;animation:__sr_in .22s cubic-bezier(.2,.85,.25,1);
+      font:400 14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+    @keyframes __sr_in{from{opacity:0;transform:translateX(-50%) translateY(-10px) scale(.98)}
+      to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}
+    #__snaproll_ov .sr-head{display:flex;align-items:center;gap:12px;padding:15px 18px 12px}
+    #__snaproll_ov .sr-chip{width:32px;height:32px;flex:0 0 auto;border-radius:10px;
+      display:flex;align-items:center;justify-content:center;
+      background:linear-gradient(135deg,#6d5efc,#8f7bff);
+      box-shadow:0 6px 16px rgba(109,94,252,.5)}
+    #__snaproll_ov .sr-chip svg{width:18px;height:18px;fill:#fff}
+    #__snaproll_ov .sr-title{font-weight:700;font-size:16px;letter-spacing:.2px;line-height:1.1}
+    #__snaproll_ov .sr-sub{font-size:11px;color:rgba(238,240,247,.5);margin-top:2px;letter-spacing:.2px}
+    #__snaproll_ov .sr-body{padding:0 18px 18px}
+    #__snaproll_ov .sr-label{color:rgba(238,240,247,.82);font-size:13px;margin:2px 0 14px}
+    #__snaproll_ov .sr-dots{display:flex;align-items:center;gap:8px;height:20px}
+    #__snaproll_ov .sr-dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto;
+      background:rgba(255,255,255,.20);transition:background .2s}
+    #__snaproll_ov .sr-dot.sr-pending{background:#8f7bff}
+    #__snaproll_ov .sr-pac{width:18px;height:18px;flex:0 0 auto;border-radius:50%;
+      background:#a996ff;box-shadow:0 0 12px rgba(143,123,255,.75);
+      clip-path:polygon(100% 25%,50% 50%,100% 75%,100% 100%,0 100%,0 0,100% 0);
+      animation:__sr_chomp .32s linear infinite}
+    @keyframes __sr_chomp{0%,100%{clip-path:polygon(100% 25%,50% 50%,100% 75%,100% 100%,0 100%,0 0,100% 0)}
+      50%{clip-path:polygon(100% 50%,50% 50%,100% 50%,100% 100%,0 100%,0 0,100% 0)}}`;
+  const style = document.createElement("style");
+  style.id = "__snaproll_ov_style";
+  style.textContent = CSS;
+  const el = document.createElement("div");
+  el.id = "__snaproll_ov";
+  el.innerHTML =
+    '<div class="sr-head">' +
+    '<span class="sr-chip"><svg viewBox="0 0 24 24"><path d="M9 3l-1.8 2H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 5a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg></span>' +
+    '<span><span class="sr-title">Snaproll</span><span class="sr-sub" style="display:block">Snapping the whole scroll</span></span>' +
+    "</div>" +
+    '<div class="sr-body"><p class="sr-label">Screen capture in progress…</p>' +
+    '<div class="sr-dots" id="__snaproll_dots"></div></div>';
+  const root = document.documentElement;
+  root.appendChild(style);
+  root.appendChild(el);
+  window.__snaproll_ov = { el, dots: el.querySelector("#__snaproll_dots"), style, total };
+}
+
+function updateOverlay(done, total) {
+  const ov = window.__snaproll_ov;
+  if (!ov) return;
+  ov.el.style.display = "block";
+  const N = Math.max(6, Math.min(16, total));
+  const eaten = Math.min(N, Math.round((done / total) * N));
+  let html = "";
+  for (let i = 0; i < N; i++) {
+    if (i < eaten) html += '<span class="sr-dot"></span>';
+    else if (i === eaten) html += '<span class="sr-pac"></span>';
+    else html += '<span class="sr-dot sr-pending"></span>';
+  }
+  ov.dots.innerHTML = html;
+}
+
+function restorePage() {
+  const s = window.__snaproll;
+  if (!s) return;
+  for (const [el, val, prio] of s.hidden) {
+    el.style.removeProperty("display");
+    if (val) el.style.setProperty("display", val, prio || "");
+  }
+  const st = document.getElementById("__snaproll_style");
+  if (st) st.remove();
+  const ov = window.__snaproll_ov;
+  if (ov) {
+    if (ov.el) ov.el.remove();
+    if (ov.style) ov.style.remove();
+    delete window.__snaproll_ov;
+  }
+  document.documentElement.style.scrollBehavior = s.scrollBehavior || "";
+  window.scrollTo(s.scrollX, s.scrollY);
+  delete window.__snaproll;
+}
