@@ -37,24 +37,42 @@ async function init() {
   render();
   el("resetBtn").disabled = false;
   el("meta").textContent =
-    `${full.width} × ${full.height}px  ·  ${shortUrl(data.url)}  ·  captured ${new Date(data.ts).toLocaleString()}`;
+    `${full.width} × ${full.height}px${data.scaledDown ? " (scaled to fit browser limits)" : ""}  ·  ${shortUrl(data.url)}  ·  captured ${new Date(data.ts).toLocaleString()}`;
   wireTools();
 }
+
+// Chrome refuses canvases past ~32767px a side or ~268M px total and silently
+// returns a blank image, so very long pages are scaled down to fit.
+const MAX_SIDE = 32000;
+const MAX_AREA = 250e6;
 
 function stitch(data) {
   return new Promise((resolve) => {
     const { tiles, totalWidth, totalHeight, dpr } = data;
+    // v1.0 captures had no clip: each tile was the whole viewport.
+    const clip = data.clip || { left: 0, top: 0, width: data.viewportW, height: data.viewportH };
+    let w = totalWidth * dpr;
+    let h = totalHeight * dpr;
+    const fit = Math.min(1, MAX_SIDE / w, MAX_SIDE / h, Math.sqrt(MAX_AREA / (w * h)));
+    const k = dpr * fit; // CSS px -> output px
     const c = document.createElement("canvas");
-    c.width = Math.round(totalWidth * dpr);
-    c.height = Math.round(totalHeight * dpr);
+    c.width = Math.round(totalWidth * k);
+    c.height = Math.round(totalHeight * k);
     const ctx = c.getContext("2d");
+    ctx.imageSmoothingQuality = "high";
+    data.scaledDown = fit < 1;
     let i = 0;
     const next = () => {
       if (i >= tiles.length) return resolve(c);
       const t = tiles[i++];
       const img = new Image();
       img.onload = () => {
-        ctx.drawImage(img, Math.round(t.x * dpr), Math.round(t.y * dpr));
+        const sx = clip.left * dpr;
+        const sy = clip.top * dpr;
+        const sw = Math.min(clip.width * dpr, img.width - sx);
+        const sh = Math.min(clip.height * dpr, img.height - sy);
+        ctx.drawImage(img, sx, sy, sw, sh,
+          Math.round(t.x * k), Math.round(t.y * k), Math.round(sw * fit), Math.round(sh * fit));
         next();
       };
       img.onerror = next;

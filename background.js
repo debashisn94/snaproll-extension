@@ -31,10 +31,10 @@ chrome.action.onClicked.addListener((tab) => {
 
 async function run(tab) {
   const info = await inject(tab.id, prepareCapture);
-  const { totalWidth, totalHeight, viewportW, viewportH, dpr } = info;
+  const { totalWidth, totalHeight, stepW, stepH, clip, dpr } = info;
 
-  const yStops = stops(totalHeight, viewportH);
-  const xStops = stops(totalWidth, viewportW);
+  const yStops = stops(totalHeight, stepH);
+  const xStops = stops(totalWidth, stepW);
   const total = yStops.length * xStops.length;
 
   const tiles = [];
@@ -85,8 +85,7 @@ async function run(tab) {
       tiles,
       totalWidth,
       totalHeight,
-      viewportW,
-      viewportH,
+      clip, // viewport rect (CSS px) each tile is cut from
       dpr,
       url: tab.url,
       title: tab.title,
@@ -130,16 +129,8 @@ function clearBadge() {
 function prepareCapture() {
   const doc = document.documentElement;
   const body = document.body;
-  const totalWidth = Math.max(
-    doc.scrollWidth,
-    body ? body.scrollWidth : 0,
-    doc.clientWidth
-  );
-  const totalHeight = Math.max(
-    doc.scrollHeight,
-    body ? body.scrollHeight : 0,
-    doc.clientHeight
-  );
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
 
   const style = document.createElement("style");
   style.id = "__snaproll_style";
@@ -148,34 +139,119 @@ function prepareCapture() {
     "html{scrollbar-width:none!important}";
   (document.head || doc).appendChild(style);
 
-  window.__snaproll = {
+  const s = (window.__snaproll = {
     scrollX: window.scrollX,
     scrollY: window.scrollY,
     scrollBehavior: doc.style.scrollBehavior,
+    scroller: null,
     hidden: [],
-  };
+    styled: [],
+  });
   doc.style.scrollBehavior = "auto";
 
+  // Pin layout before measuring, so nothing reflows between tiles:
+  // sticky -> relative (keeps its flow slot), fixed backgrounds -> scroll.
+  const all = body ? body.querySelectorAll("*") : [];
+  for (const el of all) {
+    const cs = getComputedStyle(el);
+    if (cs.position === "sticky") {
+      setImportant(el, { position: "relative", top: "auto", bottom: "auto", left: "auto", right: "auto" });
+    }
+    if (cs.backgroundAttachment === "fixed") setImportant(el, { "background-attachment": "scroll" });
+  }
+
+  const pageW = Math.max(doc.scrollWidth, body ? body.scrollWidth : 0, doc.clientWidth);
+  const pageH = Math.max(doc.scrollHeight, body ? body.scrollHeight : 0, doc.clientHeight);
+
+  // App-style pages (Gmail, Notion, ChatGPT…) don't scroll the window; an inner
+  // element does. Find the biggest visible one and capture that instead.
+  if (pageH <= vh + 15) {
+    const el = findScroller(vw, vh);
+    if (el) {
+      const r = el.getBoundingClientRect();
+      const left = Math.max(0, r.left);
+      const top = Math.max(0, r.top);
+      const clip = {
+        left,
+        top,
+        width: Math.min(r.left + el.clientWidth, vw) - left,
+        height: Math.min(r.top + el.clientHeight, vh) - top,
+      };
+      s.scroller = { el, top: el.scrollTop, left: el.scrollLeft, behavior: el.style.scrollBehavior };
+      el.style.scrollBehavior = "auto";
+      return {
+        totalWidth: clip.width,
+        totalHeight: Math.max(el.scrollHeight, clip.height),
+        stepW: clip.width,
+        stepH: clip.height,
+        clip,
+        dpr: window.devicePixelRatio || 1,
+      };
+    }
+  }
+
   return {
-    totalWidth,
-    totalHeight,
-    viewportW: window.innerWidth,
-    viewportH: window.innerHeight,
+    totalWidth: pageW,
+    totalHeight: pageH,
+    stepW: vw,
+    stepH: vh,
+    clip: { left: 0, top: 0, width: vw, height: vh },
     dpr: window.devicePixelRatio || 1,
   };
+
+  function setImportant(el, props) {
+    const prev = {};
+    for (const k in props) {
+      prev[k] = [el.style.getPropertyValue(k), el.style.getPropertyPriority(k)];
+      el.style.setProperty(k, props[k], "important");
+    }
+    s.styled.push([el, prev]);
+  }
+
+  function findScroller(vw, vh) {
+    let best = null;
+    let bestH = 0;
+    for (const el of all) {
+      const sh = el.scrollHeight;
+      const ch = el.clientHeight;
+      if (sh <= ch + 5 || ch <= 50 || el.clientWidth <= 40 || sh <= bestH) continue;
+      const cs = getComputedStyle(el);
+      if (cs.overflowY !== "auto" && cs.overflowY !== "scroll" && cs.overflowY !== "overlay") continue;
+      if (cs.display === "none" || cs.visibility === "hidden") continue;
+      const r = el.getBoundingClientRect();
+      const slack = 18;
+      if (r.left + slack < 0 || r.top + slack < 0 || r.right > vw + slack || r.bottom > vh + slack) continue;
+      best = el;
+      bestH = sh;
+    }
+    return best;
+  }
 }
 
 function scrollTile(x, y, hideFixed) {
   const s = window.__snaproll;
   if (hideFixed && s && s.hidden.length === 0) {
+    // After the first tile, hide fixed headers/widgets/banners so they don't
+    // repeat on every tile. visibility (not display) = no reflow, no seams.
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
     const all = document.body ? document.body.querySelectorAll("*") : [];
     for (const el of all) {
       const cs = getComputedStyle(el);
-      if ((cs.position === "fixed" || cs.position === "sticky") && cs.display !== "none") {
-        s.hidden.push([el, el.style.getPropertyValue("display"), el.style.getPropertyPriority("display")]);
-        el.style.setProperty("display", "none", "important");
-      }
+      if (cs.position !== "fixed" || cs.display === "none" || cs.visibility === "hidden") continue;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      if (r.bottom <= 0 || r.right <= 0 || r.top >= vh || r.left >= vw) continue; // offscreen
+      if (r.height >= vh - 2) continue; // full-height sidebar/backdrop: keep it on every tile
+      s.hidden.push([el, el.style.getPropertyValue("visibility"), el.style.getPropertyPriority("visibility")]);
+      el.style.setProperty("visibility", "hidden", "important");
     }
+  }
+  if (s && s.scroller) {
+    const el = s.scroller.el;
+    el.scrollTop = y;
+    el.scrollLeft = x;
+    return { x: el.scrollLeft, y: el.scrollTop };
   }
   window.scrollTo(x, y);
   return { x: window.scrollX, y: window.scrollY };
@@ -257,8 +333,14 @@ function restorePage() {
   const s = window.__snaproll;
   if (!s) return;
   for (const [el, val, prio] of s.hidden) {
-    el.style.removeProperty("display");
-    if (val) el.style.setProperty("display", val, prio || "");
+    el.style.removeProperty("visibility");
+    if (val) el.style.setProperty("visibility", val, prio || "");
+  }
+  for (const [el, prev] of s.styled) {
+    for (const k in prev) {
+      el.style.removeProperty(k);
+      if (prev[k][0]) el.style.setProperty(k, prev[k][0], prev[k][1] || "");
+    }
   }
   const st = document.getElementById("__snaproll_style");
   if (st) st.remove();
@@ -267,6 +349,12 @@ function restorePage() {
     if (ov.el) ov.el.remove();
     if (ov.style) ov.style.remove();
     delete window.__snaproll_ov;
+  }
+  if (s.scroller) {
+    const { el, top, left, behavior } = s.scroller;
+    el.scrollTop = top;
+    el.scrollLeft = left;
+    el.style.scrollBehavior = behavior || "";
   }
   document.documentElement.style.scrollBehavior = s.scrollBehavior || "";
   window.scrollTo(s.scrollX, s.scrollY);
