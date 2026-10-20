@@ -61,24 +61,24 @@ function stitch(data) {
     const ctx = c.getContext("2d");
     ctx.imageSmoothingQuality = "high";
     data.scaledDown = fit < 1;
-    let i = 0;
-    const next = () => {
-      if (i >= tiles.length) return resolve(c);
-      const t = tiles[i++];
-      const img = new Image();
-      img.onload = () => {
-        const sx = clip.left * dpr;
-        const sy = clip.top * dpr;
-        const sw = Math.min(clip.width * dpr, img.width - sx);
-        const sh = Math.min(clip.height * dpr, img.height - sy);
-        ctx.drawImage(img, sx, sy, sw, sh,
-          Math.round(t.x * k), Math.round(t.y * k), Math.round(sw * fit), Math.round(sh * fit));
-        next();
-      };
-      img.onerror = next;
-      img.src = t.dataUrl;
+    const draw = (t, img) => {
+      const sx = clip.left * dpr;
+      const sy = clip.top * dpr;
+      const sw = Math.min(clip.width * dpr, img.width - sx);
+      const sh = Math.min(clip.height * dpr, img.height - sy);
+      ctx.drawImage(img, sx, sy, sw, sh,
+        Math.round(t.x * k), Math.round(t.y * k), Math.round(sw * fit), Math.round(sh * fit));
     };
-    next();
+    // Decode every tile at once instead of one after another.
+    Promise.all(tiles.map((t) => new Promise((res) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = () => res(null);
+      img.src = t.dataUrl;
+    }))).then((imgs) => {
+      imgs.forEach((img, i) => img && draw(tiles[i], img));
+      resolve(c);
+    });
   });
 }
 

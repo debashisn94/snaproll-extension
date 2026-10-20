@@ -3,9 +3,9 @@
 // captureVisibleTab -> stash tiles in storage -> open the editor tab.
 
 const CAPTURE_KEY = "snaproll_capture";
-const RENDER_WAIT_MS = 130;      // let the page paint after each scroll
-const MIN_CAPTURE_GAP_MS = 600;  // stay under captureVisibleTab rate limit
-const CAPTURE_HIDE_MS = 70;      // let the hidden overlay leave the frame before we snap
+const RENDER_WAIT_MS = 150;      // let the page paint after each scroll
+const OVERLAY_HIDE_AT_MS = 80;   // page hides the overlay itself this far into the wait
+const MIN_CAPTURE_GAP_MS = 505;  // Chrome allows 2 captureVisibleTab calls/sec
 
 let busy = false;
 
@@ -48,26 +48,16 @@ async function run(tab) {
 
     for (const y of yStops) {
       for (const x of xStops) {
-        // Overlay stays VISIBLE here — the user watches it while the page settles.
-        const pos = await inject(tab.id, scrollTile, [x, y, !first]);
+        // Overlay stays visible while the page settles; the page hides it
+        // itself partway through, so no extra round-trip before the shot.
+        const pos = await inject(tab.id, scrollTile, [x, y, !first, OVERLAY_HIDE_AT_MS]);
         await delay(RENDER_WAIT_MS);
 
-        const gap = Date.now() - lastCapture;
-        if (gap < MIN_CAPTURE_GAP_MS) await delay(MIN_CAPTURE_GAP_MS - gap);
-
-        // Hide the overlay ONLY for the shot, and give it a beat to leave the frame.
-        await inject(tab.id, toggleOverlay, [false]);
-        await delay(CAPTURE_HIDE_MS);
-
-        let dataUrl;
-        try {
-          dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
-        } catch (e) {
-          // Rate-limited or transient — back off once and retry.
-          await delay(900);
-          dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
-        }
+        // Scroll + settle run inside Chrome's rate-limit window, not after it.
+        const wait = lastCapture + MIN_CAPTURE_GAP_MS - Date.now();
+        if (wait > 0) await delay(wait);
         lastCapture = Date.now();
+        const dataUrl = await capture(tab.windowId);
 
         tiles.push({ x: pos.x, y: pos.y, dataUrl });
         first = false;
@@ -104,6 +94,18 @@ function stops(total, step) {
   for (let v = 0; v < total; v += step) out.push(v);
   if (out.length === 0) out.push(0);
   return out;
+}
+
+async function capture(windowId) {
+  for (let tries = 0; ; tries++) {
+    try {
+      return await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
+    } catch (e) {
+      const quota = /MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/.test(String(e && e.message));
+      if (tries >= (quota ? 40 : 1)) throw e;
+      await delay(quota ? 50 : 300);
+    }
+  }
 }
 
 function inject(tabId, func, args = []) {
@@ -228,8 +230,13 @@ function prepareCapture() {
   }
 }
 
-function scrollTile(x, y, hideFixed) {
+function scrollTile(x, y, hideFixed, hideOverlayAt) {
   const s = window.__snaproll;
+  const ov = window.__snaproll_ov;
+  if (ov) {
+    clearTimeout(ov.hideTimer);
+    ov.hideTimer = setTimeout(() => (ov.el.style.display = "none"), hideOverlayAt);
+  }
   if (hideFixed && s && s.hidden.length === 0) {
     // After the first tile, hide fixed headers/widgets/banners so they don't
     // repeat on every tile. visibility (not display) = no reflow, no seams.
@@ -255,11 +262,6 @@ function scrollTile(x, y, hideFixed) {
   }
   window.scrollTo(x, y);
   return { x: window.scrollX, y: window.scrollY };
-}
-
-function toggleOverlay(show) {
-  const ov = window.__snaproll_ov;
-  if (ov) ov.el.style.display = show ? "block" : "none";
 }
 
 function createOverlay(total) {
@@ -317,6 +319,7 @@ function createOverlay(total) {
 function updateOverlay(done, total) {
   const ov = window.__snaproll_ov;
   if (!ov) return;
+  clearTimeout(ov.hideTimer);
   ov.el.style.display = "block";
   const N = Math.max(6, Math.min(16, total));
   const eaten = Math.min(N, Math.round((done / total) * N));

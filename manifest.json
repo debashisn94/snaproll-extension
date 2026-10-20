@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Snaproll — Full Page Screenshot",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Snap the whole scroll. Capture a full-page screenshot, then crop and download it as PNG, JPG, or PDF.",
   "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage"],
   "host_permissions": ["<all_urls>"],
