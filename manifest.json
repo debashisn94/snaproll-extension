@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Snaproll — Full Page Screenshot",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Snap the whole scroll. Full-page screenshots with free annotation, blur, frames and paged PDF. Nothing leaves your computer.",
   "permissions": [
     "activeTab",

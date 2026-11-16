@@ -4,8 +4,8 @@
 
 const CAPTURE_KEY = "snaproll_capture";
 const RENDER_WAIT_MS = 150;      // let the page paint after each scroll
-const OVERLAY_HIDE_AT_MS = 80;   // page hides the overlay itself this far into the wait
-const MIN_CAPTURE_GAP_MS = 505;  // Chrome allows 2 captureVisibleTab calls/sec
+const MIN_CAPTURE_GAP_MS = 505;  // Chrome/Edge allow 2 captureVisibleTab calls/sec
+const HIDDEN_LEAD_MS = 200;      // overlay is hidden at least this long before a shot
 
 let busy = false;
 
@@ -48,14 +48,17 @@ async function run(tab) {
 
     for (const y of yStops) {
       for (const x of xStops) {
-        // Overlay stays visible while the page settles; the page hides it
-        // itself partway through, so no extra round-trip before the shot.
-        const pos = await inject(tab.id, scrollTile, [x, y, !first, OVERLAY_HIDE_AT_MS]);
+        // The overlay stays up while we sit out Chrome's rate limit, then is
+        // hidden in the same step as the scroll. Hiding "just before" the shot
+        // was not enough: on busy pages (Bing) the browser can hand back a
+        // frame that is a few frames old, overlay and all.
+        if (!first) {
+          const early = lastCapture + MIN_CAPTURE_GAP_MS - HIDDEN_LEAD_MS - Date.now();
+          if (early > 0) await delay(early);
+        }
+        const pos = await inject(tab.id, scrollTile, [x, y, !first]);
         await delay(RENDER_WAIT_MS);
-        // The timer above can fire late on busy pages (Bing, Gmail), and a
-        // display change only counts once it is painted. Confirm both before
-        // the shot; this overlaps with the rate-limit wait below.
-        await inject(tab.id, hideOverlayPainted);
+        await inject(tab.id, hideOverlayPainted); // wait until that frame is painted
 
         // Scroll + settle run inside Chrome's rate-limit window, not after it.
         const wait = lastCapture + MIN_CAPTURE_GAP_MS - Date.now();
@@ -244,13 +247,10 @@ function prepareCapture() {
   }
 }
 
-function scrollTile(x, y, hideFixed, hideOverlayAt) {
+function scrollTile(x, y, hideFixed) {
   const s = window.__snaproll;
   const ov = window.__snaproll_ov;
-  if (ov) {
-    clearTimeout(ov.hideTimer);
-    ov.hideTimer = setTimeout(() => (ov.el.style.display = "none"), hideOverlayAt);
-  }
+  if (ov) ov.el.style.display = "none";
   if (hideFixed && s && s.hidden.length === 0) {
     // After the first tile, hide fixed headers/widgets/banners so they don't
     // repeat on every tile. visibility (not display) = no reflow, no seams.
@@ -282,10 +282,7 @@ function scrollTile(x, y, hideFixed, hideOverlayAt) {
 // (two animation frames), with a timeout in case frames are throttled.
 function hideOverlayPainted() {
   const ov = window.__snaproll_ov;
-  if (ov) {
-    clearTimeout(ov.hideTimer);
-    ov.el.style.display = "none";
-  }
+  if (ov) ov.el.style.display = "none";
   return new Promise((resolve) => {
     const t = setTimeout(resolve, 120);
     requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); resolve(); }));
@@ -347,7 +344,9 @@ function createOverlay(total) {
 function updateOverlay(done, total) {
   const ov = window.__snaproll_ov;
   if (!ov) return;
-  clearTimeout(ov.hideTimer);
+  // The slide-in plays once. Re-showing replays CSS animations, and a shot
+  // landing mid-fade would bake a half-transparent card into the image.
+  if (done > 0) ov.el.style.animation = "none";
   ov.el.style.display = "block";
   const N = Math.max(6, Math.min(16, total));
   const eaten = Math.min(N, Math.round((done / total) * N));
