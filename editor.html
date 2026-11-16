@@ -14,30 +14,103 @@
         </span>
         <span class="brand-name">Snaproll</span>
       </div>
+
+      <div class="tools" id="tools">
+        <div class="group" role="toolbar" aria-label="Annotate">
+          <button class="ibtn" data-tool="rect" title="Rectangle (R) · Shift = square">
+            <svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="2"/></svg></button>
+          <button class="ibtn" data-tool="arrow" title="Arrow (A) · Shift = snap 45°">
+            <svg viewBox="0 0 24 24"><path d="M5 19L19 5M10 5h9v9"/></svg></button>
+          <button class="ibtn" data-tool="hl" title="Highlighter (H)">
+            <svg viewBox="0 0 24 24"><path d="M4 20h16M7 15l8-8 3 3-8 8H7v-3z"/></svg></button>
+          <button class="ibtn" data-tool="text" title="Text (T) · Shift+Enter = new line">
+            <svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></button>
+          <button class="ibtn" data-tool="blur" title="Blur / redact (B)">
+            <svg viewBox="0 0 24 24"><path d="M4 4h4v4H4zM12 4h4v4h-4zM8 8h4v4H8zM16 8h4v4h-4zM4 12h4v4H4zM12 12h4v4h-4zM8 16h4v4H8zM16 16h4v4h-4z" class="fill"/></svg></button>
+          <button class="ibtn" data-tool="crop" title="Crop (C) · Enter = apply">
+            <svg viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14"/></svg></button>
+        </div>
+
+        <div class="group swatches" id="swatches" aria-label="Colour">
+          <button class="sw" data-color="#ff3b5c" style="--c:#ff3b5c" title="Red"></button>
+          <button class="sw" data-color="#ffb020" style="--c:#ffb020" title="Amber"></button>
+          <button class="sw" data-color="#22c55e" style="--c:#22c55e" title="Green"></button>
+          <button class="sw" data-color="#3b82f6" style="--c:#3b82f6" title="Blue"></button>
+          <button class="sw" data-color="#7c5cff" style="--c:#7c5cff" title="Violet"></button>
+          <button class="sw" data-color="#111111" style="--c:#111111" title="Black"></button>
+        </div>
+
+        <div class="group seg" id="sizes" aria-label="Size">
+          <button data-size="0" title="Thin (1)">S</button>
+          <button data-size="1" title="Medium (2)">M</button>
+          <button data-size="2" title="Thick (3)">L</button>
+        </div>
+
+        <div class="group">
+          <button id="undoBtn" class="ibtn" title="Undo (⌘Z)" disabled>
+            <svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+          <button id="redoBtn" class="ibtn" title="Redo (⇧⌘Z)" disabled>
+            <svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
+          <button id="resetBtn" class="ibtn" title="Back to original capture" disabled>
+            <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></svg></button>
+        </div>
+      </div>
+
       <div class="tools">
-        <button id="cropBtn" class="btn">✂ Crop</button>
-        <button id="applyBtn" class="btn hidden">✓ Apply</button>
+        <button id="applyBtn" class="btn primary hidden">✓ Apply crop</button>
         <button id="cancelBtn" class="btn ghost hidden">Cancel</button>
-        <span class="sep"></span>
-        <button id="resetBtn" class="btn ghost" disabled>↺ Reset</button>
-        <span class="sep"></span>
-        <button id="pngBtn" class="btn primary">Download PNG</button>
+        <button id="pngBtn" class="btn primary" title="Download PNG (⌘S)">Download PNG</button>
         <button id="jpgBtn" class="btn">JPG</button>
         <button id="pdfBtn" class="btn">PDF</button>
-        <button id="copyBtn" class="btn ghost">Copy</button>
-        <span class="sep"></span>
-        <button id="discardBtn" class="btn ghost danger">🗑 Discard</button>
+        <button id="copyBtn" class="btn ghost" title="Copy image (⌘C)">Copy</button>
+        <button id="settingsBtn" class="ibtn" title="Export options">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+        <button id="discardBtn" class="ibtn danger" title="Discard capture">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>
       </div>
     </header>
 
-    <div id="hint" class="hint hidden">
-      Drag on the image to select a region, then press <b>Apply</b>.
-    </div>
+    <aside id="settings" class="settings hidden" aria-label="Export options">
+      <h3>Export options</h3>
+      <label>Frame
+        <select name="frame">
+          <option value="none">None</option>
+          <option value="browser">Browser window</option>
+          <option value="stamp">URL + date footer</option>
+        </select>
+      </label>
+      <label class="row"><input type="checkbox" name="padding" /> Padded background + shadow</label>
+      <label>PDF pages
+        <select name="paper">
+          <option value="long">One long page</option>
+          <option value="a4">A4, split into pages</option>
+          <option value="letter">US Letter, split into pages</option>
+        </select>
+      </label>
+      <label class="row"><input type="checkbox" name="smartSplit" /> Smart split (don't cut through text)</label>
+      <label>File name
+        <input type="text" name="filename" spellcheck="false" />
+        <small>Tokens: {title} {host} {date} {time}. Use a slash for a subfolder, e.g. <code>Snaproll/{host}-{date}</code></small>
+      </label>
+      <label>After capture
+        <select name="autoDownload">
+          <option value="off">Open the editor</option>
+          <option value="png">Download PNG straight away</option>
+          <option value="jpg">Download JPG straight away</option>
+          <option value="pdf">Download PDF straight away</option>
+        </select>
+      </label>
+      <p class="note">Frame and padding are added on export. Everything stays on this computer.</p>
+    </aside>
+
+    <div id="hint" class="hint hidden"></div>
 
     <main id="stage" class="stage">
-      <div id="wrap" class="wrap">
+      <div id="wrap" class="wrap hidden">
         <canvas id="view"></canvas>
+        <canvas id="ink"></canvas>
         <div id="selection" class="selection hidden"></div>
+        <textarea id="textInput" class="text-input hidden" rows="1" spellcheck="false"></textarea>
       </div>
       <div id="empty" class="empty hidden">
         <h2>Nothing to edit</h2>
@@ -51,6 +124,7 @@
     </main>
 
     <footer id="meta" class="meta"></footer>
+    <div id="toast" class="toast hidden" role="status"></div>
 
     <script src="editor.js"></script>
   </body>

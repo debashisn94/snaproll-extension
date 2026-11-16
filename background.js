@@ -84,7 +84,17 @@ async function run(tab) {
   });
 
   clearBadge();
-  await chrome.tabs.create({ url: chrome.runtime.getURL("editor.html") });
+  // "After capture → download straight away" opens the editor in the background;
+  // it exports with the saved options and closes itself.
+  let auto = null;
+  try {
+    const { snaproll_settings: s } = await chrome.storage.sync.get("snaproll_settings");
+    if (s && ["png", "jpg", "pdf"].includes(s.autoDownload)) auto = s.autoDownload;
+  } catch (e) { /* open the editor */ }
+  await chrome.tabs.create({
+    url: chrome.runtime.getURL("editor.html" + (auto ? `?auto=${auto}` : "")),
+    active: !auto,
+  });
 }
 
 // --- helpers ---------------------------------------------------------------
