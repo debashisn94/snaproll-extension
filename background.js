@@ -52,6 +52,10 @@ async function run(tab) {
         // itself partway through, so no extra round-trip before the shot.
         const pos = await inject(tab.id, scrollTile, [x, y, !first, OVERLAY_HIDE_AT_MS]);
         await delay(RENDER_WAIT_MS);
+        // The timer above can fire late on busy pages (Bing, Gmail), and a
+        // display change only counts once it is painted. Confirm both before
+        // the shot; this overlaps with the rate-limit wait below.
+        await inject(tab.id, hideOverlayPainted);
 
         // Scroll + settle run inside Chrome's rate-limit window, not after it.
         const wait = lastCapture + MIN_CAPTURE_GAP_MS - Date.now();
@@ -272,6 +276,20 @@ function scrollTile(x, y, hideFixed, hideOverlayAt) {
   }
   window.scrollTo(x, y);
   return { x: window.scrollX, y: window.scrollY };
+}
+
+// Hide the overlay and resolve only after the browser has painted that frame
+// (two animation frames), with a timeout in case frames are throttled.
+function hideOverlayPainted() {
+  const ov = window.__snaproll_ov;
+  if (ov) {
+    clearTimeout(ov.hideTimer);
+    ov.el.style.display = "none";
+  }
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, 120);
+    requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); resolve(); }));
+  });
 }
 
 function createOverlay(total) {
