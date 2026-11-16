@@ -206,6 +206,7 @@ html, body {
   display: grid; gap: 12px;
 }
 .settings h3 { margin: 0; font-size: 14px; }
+.settings h3 + label { margin-top: -4px; }
 .settings label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
 .settings label.row { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 500; }
 .settings select, .settings input[type="text"] {

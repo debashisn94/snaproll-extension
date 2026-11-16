@@ -10,6 +10,8 @@ const DEFAULTS = {
   smartSplit: true,
   filename: "{title}-{date}-{time}",
   autoDownload: "off",  // off | png | jpg | pdf
+  expandBoxes: true,    // read by background.js at capture time
+  hideAds: true,
 };
 
 const el = (id) => document.getElementById(id);

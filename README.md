@@ -7,6 +7,9 @@ Capture an entire scrollable web page, then **crop** and download it as **PNG, J
 ## How it works
 1. Click the toolbar icon (or press **Alt+Shift+S**) on any normal web page.
 2. Snaproll pins the layout first (sticky → relative, fixed backgrounds → scroll), hides the scrollbar and, after the first tile, repeating fixed bars (via `visibility`, so nothing reflows). On app-style pages where the window doesn't scroll (Gmail, Notion, ChatGPT…) it finds the inner scrolling panel and captures that instead. It scrolls tile-by-tile at Chrome's 2 captures/sec ceiling.
+   - **Scroll boxes** inside the page (code blocks, comment threads) are opened to full height first, then put back.
+   - **Late floaters** (cookie banners, sticky ads that slide in on scroll) are checked for before every tile, so they never repeat mid-page.
+   - **Ads and cookie pop-ups** from the common ad networks and consent managers are removed before measuring. Both switches live under ⚙ → Capture.
 3. Tiles are stitched at full device-pixel resolution and the **editor tab** opens.
 
 ## Editor (all free, all local)

@@ -30,7 +30,12 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 async function run(tab) {
-  const info = await inject(tab.id, prepareCapture);
+  let opts = { expandBoxes: true, hideAds: true };
+  try {
+    const { snaproll_settings: st } = await chrome.storage.sync.get("snaproll_settings");
+    if (st) opts = { expandBoxes: st.expandBoxes !== false, hideAds: st.hideAds !== false };
+  } catch (e) { /* defaults */ }
+  const info = await inject(tab.id, prepareCapture, [opts]);
   const { totalWidth, totalHeight, stepW, stepH, clip, dpr } = info;
 
   const yStops = stops(totalHeight, stepH);
@@ -58,7 +63,7 @@ async function run(tab) {
         }
         const pos = await inject(tab.id, scrollTile, [x, y, !first]);
         await delay(RENDER_WAIT_MS);
-        await inject(tab.id, hideOverlayPainted); // wait until that frame is painted
+        await inject(tab.id, hideOverlayPainted, [!first]); // late floaters + wait for paint
 
         // Scroll + settle run inside Chrome's rate-limit window, not after it.
         const wait = lastCapture + MIN_CAPTURE_GAP_MS - Date.now();
@@ -145,7 +150,8 @@ function clearBadge() {
 
 // --- functions injected into the page (must be self-contained) -------------
 
-function prepareCapture() {
+function prepareCapture(opts) {
+  opts = opts || {};
   const doc = document.documentElement;
   const body = document.body;
   const vw = window.innerWidth;
@@ -168,6 +174,35 @@ function prepareCapture() {
   });
   doc.style.scrollBehavior = "auto";
 
+  // Called before every tile after the first (from scrollTile and right before
+  // the shot): hide anything floating that would otherwise repeat on each tile,
+  // including cookie banners and sticky ads that only appear after scrolling.
+  // visibility (not display) = no reflow, no seams. Elements already on screen
+  // for tile 1 were captured there once.
+  const seen = new WeakSet();
+  s.hideFloaters = () => {
+    const vw2 = window.innerWidth;
+    const vh2 = window.innerHeight;
+    const nodes = document.body ? document.body.querySelectorAll("*") : [];
+    for (const el of nodes) {
+      if (seen.has(el) || el.id === "__snaproll_ov") continue;
+      const cs = getComputedStyle(el);
+      if (cs.position === "sticky") {
+        seen.add(el);
+        setImportant(el, { position: "relative", top: "auto", bottom: "auto", left: "auto", right: "auto" });
+        continue;
+      }
+      if (cs.position !== "fixed" || cs.display === "none" || cs.visibility === "hidden") continue;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      if (r.bottom <= 0 || r.right <= 0 || r.top >= vh2 || r.left >= vw2) continue; // offscreen
+      if (r.height >= vh2 - 2) continue; // full-height sidebar/backdrop: keep it on every tile
+      seen.add(el);
+      s.hidden.push([el, el.style.getPropertyValue("visibility"), el.style.getPropertyPriority("visibility")]);
+      el.style.setProperty("visibility", "hidden", "important");
+    }
+  };
+
   // Pin layout before measuring, so nothing reflows between tiles:
   // sticky -> relative (keeps its flow slot), fixed backgrounds -> scroll.
   const all = body ? body.querySelectorAll("*") : [];
@@ -179,8 +214,52 @@ function prepareCapture() {
     if (cs.backgroundAttachment === "fixed") setImportant(el, { "background-attachment": "scroll" });
   }
 
-  const pageW = Math.max(doc.scrollWidth, body ? body.scrollWidth : 0, doc.clientWidth);
-  const pageH = Math.max(doc.scrollHeight, body ? body.scrollHeight : 0, doc.clientHeight);
+  // Ads and cookie/consent pop-ups: remove before measuring so the page
+  // closes up around them. Known ad-network and consent-manager hooks only.
+  if (opts.hideAds) {
+    const AD = [
+      "ins.adsbygoogle", ".adsbygoogle", "[data-ad-slot]", "[data-ad-unit]", "[data-google-query-id]",
+      '[id^="google_ads"]', '[id^="div-gpt-ad"]', '[id^="dfp-"]', '[id*="taboola"]', '[class*="taboola"]',
+      '[id*="outbrain"]', ".OUTBRAIN", '[id*="adzerk"]', ".everyonelovesstackoverflow", '[aria-label="Advertisement"]',
+      'iframe[src*="doubleclick.net"]', 'iframe[src*="googlesyndication"]', 'iframe[src*="amazon-adsystem"]',
+      "#onetrust-consent-sdk", "#onetrust-banner-sdk", "#CybotCookiebotDialog", ".fc-consent-root",
+      "#qc-cmp2-container", '[id^="sp_message_container"]', ".cc-window", ".js-consent-banner",
+      "#cookie-banner", "#cookie-consent", "#cookieConsent", '[class*="cookie-banner"]', '[class*="cookie-consent"]',
+      '[id*="cookie-banner"]', '[id*="cookie-notice"]', '[class*="cookie-notice"]', '[class*="consent-banner"]',
+    ].join(",");
+    let found = [];
+    try { found = document.querySelectorAll(AD); } catch (e) { /* bad selector on old engines */ }
+    for (const el of found) {
+      if (el === body || el === doc) continue;
+      setImportant(el, { display: "none" });
+      // Ad slots usually sit in a labelled box ("Advertisement", "Report this ad").
+      const box = el.parentElement;
+      if (box && box !== body && box.children.length <= 3 && box.textContent.trim().length < 40 &&
+          box.getBoundingClientRect().height < 700) {
+        setImportant(box, { display: "none" });
+      }
+    }
+  }
+
+  let pageW = Math.max(doc.scrollWidth, body ? body.scrollWidth : 0, doc.clientWidth);
+  let pageH = Math.max(doc.scrollHeight, body ? body.scrollHeight : 0, doc.clientHeight);
+
+  // Scroll boxes inside a normal page (code blocks, comment threads, tables):
+  // open them to full height so their hidden part makes it into the shot.
+  if (opts.expandBoxes && pageH > vh + 15) {
+    for (const el of all) {
+      if (el === body || el === doc || el.tagName === "TEXTAREA" || el.tagName === "SELECT") continue;
+      const sh = el.scrollHeight;
+      const ch = el.clientHeight;
+      if (ch < 20 || sh <= ch + 5 || sh > 20000) continue;
+      const cs = getComputedStyle(el);
+      if (cs.overflowY !== "auto" && cs.overflowY !== "scroll" && cs.overflowY !== "overlay") continue;
+      if (cs.position === "fixed" || cs.display === "none") continue;
+      setImportant(el, { "max-height": "none", height: "auto", "overflow-y": "visible" });
+    }
+    pageW = Math.max(doc.scrollWidth, body ? body.scrollWidth : 0, doc.clientWidth);
+    pageH = Math.max(doc.scrollHeight, body ? body.scrollHeight : 0, doc.clientHeight);
+  }
 
   // App-style pages (Gmail, Notion, ChatGPT…) don't scroll the window; an inner
   // element does. Find the biggest visible one and capture that instead.
@@ -251,23 +330,7 @@ function scrollTile(x, y, hideFixed) {
   const s = window.__snaproll;
   const ov = window.__snaproll_ov;
   if (ov) ov.el.style.display = "none";
-  if (hideFixed && s && s.hidden.length === 0) {
-    // After the first tile, hide fixed headers/widgets/banners so they don't
-    // repeat on every tile. visibility (not display) = no reflow, no seams.
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const all = document.body ? document.body.querySelectorAll("*") : [];
-    for (const el of all) {
-      const cs = getComputedStyle(el);
-      if (cs.position !== "fixed" || cs.display === "none" || cs.visibility === "hidden") continue;
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) continue;
-      if (r.bottom <= 0 || r.right <= 0 || r.top >= vh || r.left >= vw) continue; // offscreen
-      if (r.height >= vh - 2) continue; // full-height sidebar/backdrop: keep it on every tile
-      s.hidden.push([el, el.style.getPropertyValue("visibility"), el.style.getPropertyPriority("visibility")]);
-      el.style.setProperty("visibility", "hidden", "important");
-    }
-  }
+  if (hideFixed && s && s.hideFloaters) s.hideFloaters();
   if (s && s.scroller) {
     const el = s.scroller.el;
     el.scrollTop = y;
@@ -280,9 +343,12 @@ function scrollTile(x, y, hideFixed) {
 
 // Hide the overlay and resolve only after the browser has painted that frame
 // (two animation frames), with a timeout in case frames are throttled.
-function hideOverlayPainted() {
+function hideOverlayPainted(hideFixed) {
   const ov = window.__snaproll_ov;
   if (ov) ov.el.style.display = "none";
+  // Banners and sticky ads often slide in only after a scroll: check again.
+  const s = window.__snaproll;
+  if (hideFixed && s && s.hideFloaters) s.hideFloaters();
   return new Promise((resolve) => {
     const t = setTimeout(resolve, 120);
     requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); resolve(); }));
