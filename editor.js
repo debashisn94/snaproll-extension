@@ -365,7 +365,7 @@ function wireTools() {
   textInput.addEventListener("keydown", (e) => {
     e.stopPropagation();
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitText(); }
-    else if (e.key === "Escape") { textAt = null; textInput.classList.add("hidden"); }
+    else if (e.key === "Escape") { textAt = null; textInput.blur(); textInput.classList.add("hidden"); }
   });
   textInput.addEventListener("input", sizeTextInput);
   textInput.addEventListener("blur", () => { if (textAt) commitText(); });
@@ -492,6 +492,7 @@ function sizeTextInput() {
 function commitText() {
   const t = textAt;
   textAt = null;
+  textInput.blur(); // hand the keyboard back so tool shortcuts work at once
   textInput.classList.add("hidden");
   const text = textInput.value.replace(/\s+$/, "");
   if (!t || !text.trim()) return;

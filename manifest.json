@@ -1,13 +1,20 @@
 {
   "manifest_version": 3,
   "name": "Snaproll — Full Page Screenshot",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Snap the whole scroll. Full-page screenshots with free annotation, blur, frames and paged PDF. Nothing leaves your computer.",
-  "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage", "downloads"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "unlimitedStorage",
+    "downloads"
+  ],
   "commands": {
     "_execute_action": {
-      "suggested_key": { "default": "Alt+Shift+S" },
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
       "description": "Capture the full page"
     }
   },
